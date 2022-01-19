@@ -90,19 +90,7 @@ def common_time_dataset():
     gps = gps[:n, :]
     simulation_time = simulation_time[:n]
 
-    # Computing total number of landmark perceived in the studied timeframe
-    landmarks_signatures = []
-
-    for lidar_t in lidars[2]:
-        for j, _ in enumerate(lidar_t):
-            if lidar_t[j] != 0.:
-                landmarks_signatures.append(lidar_t[j])
-
-    landmarks_signatures = sorted(set(landmarks_signatures))
-    nb_total_landmarks: int = len(landmarks_signatures)
-    print(f"{nb_total_landmarks = }")
-
-    # Simple down sampling of control and lidar -> Could be optimized through interpolation
+    # Simple down sampling of control and lidar -> Can be optimized through interpolation
     step_sim_control = np.floor(len(controls_time) / len(simulation_time)).astype(int)
     step_sim_lidar = np.floor(len(lidar_time) / len(simulation_time)).astype(int)
 
@@ -113,10 +101,23 @@ def common_time_dataset():
     for dimension in lidars:
         lidar_sim.append(dimension[::step_sim_lidar][:len(simulation_time)])
 
+    landmarks_signatures = set()
+    for signatures in lidar_sim[2]:
+        for signature in signatures:
+            if np.isnan(signature):
+                break
+            landmarks_signatures.add(signature)
+
+    # Sorting the landmark signatures
+    landmarks_signatures_sorted = sorted(landmarks_signatures)
+
+    # Building a correspondences dictionary: from a signature to an index
+    correspondences = {signature: j + len(simulation_time) for j, signature in enumerate(landmarks_signatures_sorted)}
+
     print(f"\n Simulation: "
           f"Simulation time: {len(simulation_time)} \n"
           f"Shape of controls: {controls_sim.shape} \n"
           f"Shape of lidar: {[dim.shape for dim in lidar_sim]} \n"
           f"Shape of GPS: {gps_sim.shape} \n")
 
-    return controls_sim, lidar_sim, gps_sim, simulation_time, nb_total_landmarks
+    return controls_sim, lidar_sim, correspondences,  gps_sim, simulation_time
