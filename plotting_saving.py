@@ -1,7 +1,7 @@
 import os
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-
+import datetime
 import numpy as np
 
 BLOCK = False
@@ -62,49 +62,85 @@ def animate_lidar(ranges, bearings, signatures, title="Lidar Measurements of the
     plt.show()
 
 
-def animate_vehicle_pose(gps: list, initial: list, time, title="Position vehicle"):
+def animate_vehicle_pose(gps: list, initial: list, posterior, landmarks, time, title="Position vehicle"):
 
     fig, ax = plt.subplots(nrows=1, ncols=1)
     fig.suptitle(title)
     ax.grid()
-    #plt.xlim(np.min(gps[0]) - 1, np.max(gps[0]) + 1)
-    #plt.ylim(np.min(gps[1]) - 1, np.max(gps[1]) + 1)
-    plt.xlim(- 1000, 1000)
-    plt.ylim(- 1000, 1000)
+    plt.xlim(np.min(initial[:, 0]) - 1, np.max(initial[:, 0]) + 1)
+    plt.ylim(np.min(initial[:, 1]) - 1, np.max(initial[:, 1]) + 1)
 
     # Vehicle truth - initial pose estimate
     vehicle_gps = ax.plot([], [], 'bx', markersize=6)[0]
-    vehicle_initial = ax.plot([], [], 'ro', markersize=6)[0]
+    path_gps = ax.plot([], [], '-b', label='_nolegend_')[0]
+    path_gps_x, path_gps_y = [], []
+
+    # Vehicle initial mean pose - dead reckoning
+    vehicle_initial = ax.plot([], [], 'go', markersize=6)[0]
+    path_init = ax.plot([], [], '-g', label='_nolegend_')[0]
+    path_init_x, path_init_y = [], []
+
+    # Vehicle Posterior
+    vehicle_posterior = ax.plot([], [], 'ro', markersize=6)[0]
+    path_post = ax.plot([], [], '-r', label='_nolegend_')[0]
+    path_post_x, path_post_y = [], []
 
     # Information to display
     pose_gps_text = ax.text(0.02, 0.85, '', transform=ax.transAxes)
-    pose_init_text = ax.text(0.7, 0.85, '', transform=ax.transAxes)
     time_viz = ax.text(0.02, 0.9, '', transform=ax.transAxes)
 
     def init():
+
+        # Vehicle GPS
         vehicle_gps.set_data([], [])
+        path_gps.set_data([], [])
+
+        # Dead Reckoning
         vehicle_initial.set_data([], [])
+        path_init.set_data([], [])
+
+        # Vehicle posterior pose
+        vehicle_posterior.set_data([], [])
+        path_post.set_data([], [])
+
+        # Texts
         pose_gps_text.set_text('')
-        pose_init_text.set_text('')
         time_viz.set_text('')
-        return vehicle_gps, vehicle_initial, pose_gps_text, pose_init_text, time_viz
 
-    def animate(f, gps_, initial_, time_):
-        
+        return vehicle_gps, path_gps, vehicle_initial, path_init, vehicle_posterior, path_post, pose_gps_text, time_viz
+
+    def animate(f, gps_, initial_, posterior_, landmarks_, time_):
+
+        # Vehicle GPS
         vehicle_gps.set_data(gps_[f][0], gps_[f][1])
-        vehicle_initial.set_data(initial_[f][0], initial_[f][1])
+        path_gps_x.append(gps_[f][0])
+        path_gps_y.append(gps_[f][1])
+        path_gps.set_data(path_gps_x, path_gps_y)
 
-        time_viz.set_text(f"Time {time_[f]} s \n")
+        # Dead Reckoning
+        vehicle_initial.set_data(initial_[f][0], initial_[f][1])
+        path_init_x.append(initial_[f][0])
+        path_init_y.append(initial_[f][1])
+        path_init.set_data(path_init_x, path_init_y)
+
+        # Vehicle posterior pose
+        vehicle_posterior.set_data(posterior_[f][0], posterior_[f][1])
+        path_post_x.append(posterior_[f][0])
+        path_post_y.append(posterior_[f][1])
+        path_post.set_data(path_post_x, path_post_y)
+
+        # Texts
+        time_viz.set_text(f"Time {datetime.timedelta(milliseconds=int(time_[f]))} s \n")
         pose_gps_text.set_text(f"Latitude: {np.round(gps_[f][0], 2)} m \n"
                                f"Longitude: {np.round(gps_[f][1], 2)} m")
         
-        return vehicle_gps, vehicle_initial, pose_gps_text, pose_init_text, time_viz
+        return vehicle_gps, path_gps, vehicle_initial, path_init, vehicle_posterior, path_post, pose_gps_text, time_viz
 
-    average_delta_t_gps = np.mean(time[1:] - time[:-1])
-    print(f"Standard deviation delta time gps: {np.std(time[1:] - time[:-1])}")
+    anim_gps = FuncAnimation(fig, animate, frames=len(time), fargs=(gps, initial, posterior, landmarks, time),
+                             init_func=init,  blit=True,
+                             repeat=False)
 
-    anim_gps = FuncAnimation(fig, animate, frames=len(time), fargs=(gps, initial, time), init_func=init,
-                             interval=average_delta_t_gps, blit=True)
+    plt.legend(["GPS Pose", "Initial mean pose", "Posterior pose"])
 
     plt.draw()
     plt.show()
@@ -112,21 +148,23 @@ def animate_vehicle_pose(gps: list, initial: list, time, title="Position vehicle
 
 def plot_parameters(controls, initial_pose, gps, simulation_time, title="Parameters"):
 
-    fig, axes = plt.subplots(nrows=3, ncols=1)
+    fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(10, 6))
     fig.suptitle(title)
 
     axes[0].set_title(f"Initial pose estimate: x and y")
-    #axes[0].plot(simulation_time, initial_pose[:, 0])
+    axes[0].plot(simulation_time, initial_pose[:, 0])
     axes[0].plot(simulation_time, initial_pose[:, 1])
-    #axes[0].plot(simulation_time, gps[:, 0])
-    #axes[0].plot(simulation_time, gps[:, 1])
+    axes[0].plot(simulation_time, gps[:, 0])
+    axes[0].plot(simulation_time, gps[:, 1])
     axes[0].legend(["x initial estimate", "y initial estimate", "x gps", "y gps"])
+    axes[0].legend(["x initial estimate", "x gps"])
+    axes[0].legend(["y initial estimate", "y gps"])
     axes[0].grid()
 
+    axes[1].set_title(f"Initial pose estimate: theta (radians) - Control Steering")
     axes[1].plot(simulation_time, initial_pose[:, 2])
     axes[1].plot(simulation_time, controls[:, 1])
     axes[1].legend(["Initial pose estimate: theta", "Control steering"])
-    axes[1].set_title(f"Initial pose estimate: theta (radians) - Control Steering")
     axes[1].grid()
 
     axes[2].plot(simulation_time, controls[:, 0])

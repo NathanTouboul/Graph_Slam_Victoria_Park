@@ -65,7 +65,7 @@ def gps_measurements():
     return gps, gps_time
 
 
-def common_time_dataset():
+def common_time_dataset(dimension: int):
 
     # Retrieving lidar measurements
     lidars, lidar_time = lidar_measurements()
@@ -81,14 +81,14 @@ def common_time_dataset():
     # Creating common vectors for simulating and plotting -> imposed by the smallest time vector
     simulation_time = np.round(gps_time).astype(int)
 
-    # DEBUGGING: n first everything
-    n = 11
-    controls = controls[:n, :]
-    controls_time = controls_time[:n]
-    lidars = [dimension[:n, :] for dimension in lidars]
-    lidar_time = lidar_time[:n]
-    gps = gps[:n, :]
-    simulation_time = simulation_time[:n]
+    # DEBUGGING: STEP
+    n = dimension
+    controls = controls[::n, :]
+    controls_time = controls_time[::n]
+    lidars = [dimension[::n, :] for dimension in lidars]
+    lidar_time = lidar_time[::n]
+    gps = gps[::n, :]
+    simulation_time = simulation_time[::n]
 
     # Simple down sampling of control and lidar -> Can be optimized through interpolation
     step_sim_control = np.floor(len(controls_time) / len(simulation_time)).astype(int)

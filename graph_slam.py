@@ -2,51 +2,58 @@ import numpy as np
 
 # Disturbance noise covariance matrix (Rt)
 DISTURBANCE_COV = np.diag([0.01**2, 0.01**2, (np.pi/180)**2])
-DISTURBANCE_COV_INV = np.linalg.inv(DISTURBANCE_COV)
+DISTURBANCE_COV_INV = np.linalg.pinv(DISTURBANCE_COV)
 
 # Measurement noise covariance matrix (Qt)
 MEASUREMENT_COV = np.diag([0.01**2, (np.pi/180)**2, 0.01 ** 2])
-MEASUREMENT_COV_INV = np.linalg.inv(MEASUREMENT_COV)
+MEASUREMENT_COV_INV = np.linalg.pinv(MEASUREMENT_COV)
+
+# Infinity value
+INF = 1E15
+
+# Number of coordinates for pose (x, y, theta) and landmarks (x, y and s)
+n_coord_pose, n_coord_landmarks = 3, 3
+
+# Storing inverse calculation of the information matrix (j: j:j_end)
+sub_matrices_inv = dict()
+
+# Distance between wheels
+span_wheel = 2.83   # meters
 
 
-def graph_slam_initialize(controls: np.ndarray, time_controls: np.ndarray, origin_pose=np.zeros((3, 1))):
+def graph_slam_initialize(controls: np.ndarray, time: np.ndarray, origin_pose=np.zeros((3, 1))):
 
     """
     Initial estimate is provided by chaining together the motion model
     :param origin_pose:
-    :param time_controls:
+    :param time:
     :param controls:
     :return:
     """
 
-    pose = np.zeros((len(time_controls), 3))
+    global n_coord_pose, span_wheel
+
+    pose = np.zeros((len(time), n_coord_pose))
     pose[0, :] = origin_pose
 
-    # Index of time
-    t = 1
-
     # Array of controls: speed and steering
-    for control in controls:
-
-        # Parameters definition
-        delta_t = (time_controls[t] - time_controls[t-1]) / 1000
-        speed, angular_vel = control[0], control[1] / delta_t
-        v_over_w = speed / angular_vel
-
-        # Previous angular velocity omega_t
-        pr_steer = pose[t - 1][2]
-
-        # Compute pose_x
-        pose[t][0] = pose[t - 1][0] - v_over_w * np.sin(pr_steer) + v_over_w * np.sin(pr_steer + angular_vel * delta_t)
-
-        # Compute pose_y
-        pose[t][1] = pose[t - 1][1] + v_over_w * np.cos(pr_steer) - v_over_w * np.cos(pr_steer + angular_vel * delta_t)
-
-        # Compute pose_omega
-        pose[t][2] = angular_vel * delta_t
+    for t, control in enumerate(controls):
 
         # Updating time
         t += 1
+
+        # Parameters definition
+        delta_t = (time[t] - time[t - 1]) / 1000    # milliseconds to seconds
+        speed, steering = control[0], control[1]
+
+        # Compute pose_x
+        pose[t][0] = pose[t - 1][0] + delta_t * speed * np.cos(pose[t - 1][2])
+
+        # Compute pose_y
+        pose[t][1] = pose[t - 1][1] + delta_t * speed * np.sin(pose[t - 1][2])
+
+        # Compute heading
+        pose[t][2] = pose[t - 1][2] + delta_t * (speed / span_wheel) * np.tan(steering)
 
     return pose
 
@@ -62,13 +69,13 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
     n_pose, n_coord = initial_mean_pose.shape[0], initial_mean_pose.shape[1]
 
     # 3 coordinates for vehicle: x, y and theta and tree coordinates for landmarks: x, y and signature
-    dim_info = n_pose * n_coord + nb_landmarks * 3
+    dim_info = n_pose * n_coord + nb_landmarks * n_coord_landmarks
 
     information_matrix = np.zeros((dim_info, dim_info))
-    information_vector = np.zeros((dim_info, 1))
+    information_vector = np.zeros((dim_info, n_coord_pose))
 
     # Adding infinite information to fixe the first pose at the origin (otherwise matrix might become singular)
-    information_matrix[0:3, 0:3] = np.diag([np.inf] * 3)
+    information_matrix[0:3, 0:3] = np.diag([INF] * 3)
 
     # Initialization pose: vehicle: x, y, theta then landmarks: x, y, signature
     pose = np.zeros((n_pose + nb_landmarks, n_coord))
@@ -80,24 +87,22 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
     # for all control u_t = (v_t, w_t)
     for control in controls:
 
-        print(f"\n {t = }")
         # Parameters definition
-        delta_t = (time[t] - time[t - 1]) / 1000
-        speed, angular_vel = control[0], control[1] / delta_t
-        v_over_w = speed / angular_vel
+        delta_t = (time[t] - time[t - 1]) / 1000  # milliseconds to seconds
+        speed, steering = control[0], control[1]
 
         # Previous angular velocity omega_t
         pr_steer = initial_mean_pose[t - 1][2]
 
         # Linear approximation of the non-linear control function g
         x_hat = np.zeros(np.shape(initial_mean_pose[t - 1]))
-        x_hat[0] = initial_mean_pose[t - 1][0] - v_over_w * np.sin(pr_steer) + v_over_w * np.sin(pr_steer + angular_vel * delta_t)
-        x_hat[1] = initial_mean_pose[t - 1][1] + v_over_w * np.cos(pr_steer) - v_over_w * np.cos(pr_steer + angular_vel * delta_t)
-        x_hat[1] = angular_vel * delta_t
+        x_hat[0] = initial_mean_pose[t - 1][0] + delta_t * speed * np.cos(initial_mean_pose[t - 1][2])
+        x_hat[1] = initial_mean_pose[t - 1][1] + delta_t * speed * np.sin(pose[t - 1][2])
+        x_hat[2] = pose[t - 1][2] + delta_t * (speed / span_wheel) * np.tan(steering)
 
         g_matrix = np.identity(3)
-        g_matrix[0][2] = - v_over_w * np.cos(pr_steer) + v_over_w * np.cos(pr_steer + angular_vel * delta_t)
-        g_matrix[1][2] = - v_over_w * np.sin(pr_steer) + v_over_w * np.sin(pr_steer + angular_vel * delta_t)
+        g_matrix[0][2] = - delta_t * speed * np.sin(initial_mean_pose[t - 1][2])
+        g_matrix[1][2] = + delta_t * speed * np.cos(pose[t - 1][2])
 
         # Inclusion of a new constraint into the information matrix and vector
         location_to_update = [t - 1, t]
@@ -115,15 +120,13 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
         t += 1
 
     # for all measurement z_t
-    already_seen = []
+    already_seen = list()
     # print("\n For all measurements")
 
     for t, (ranges, bearings, signatures) in enumerate(zip(lidars[0], lidars[1], lidars[2])):
 
         # Index of time
         t += 1
-
-        print(f"\n {t = }")
 
         for s, signature in enumerate(signatures):
 
@@ -188,21 +191,78 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
 
 def graph_slam_reduce(information_matrix: np.ndarray, information_vector: np.ndarray, correspondences: dict) -> tuple:
 
-    reduced_matrix = information_matrix[:]
-    reduced_vector = information_vector[:]
+    global n_coord_landmarks
+    global sub_matrices_inv
+
+    # The last time t (t + 1 actually) is given by the first index of feature: j
+    # Obtaining the first value of index (the dictionary was constructed sorted)
+    j_initial = next(iter(correspondences.items()))[1]
+
+    # We initialize the reduce matrix as information_matrix[0:tend, 0:tend]
+    reduced_matrix = information_matrix[:j_initial, :j_initial]
+    reduced_vector = information_vector[:j_initial, :]
 
     # The set of poses at which a feature is observed is given by the non zero rows/columns of the information matrices
     # for each feature row.
     # The correspondences dictionary is used to iterate over all features in the information matrices
 
-    for signature, j in correspondences.items():
+    matrix_subtract = np.zeros_like(reduced_matrix)
+    vector_subtract = np.zeros_like(reduced_vector)
 
-        pass
+    # hardcoded
+    n_rows_features, n_cols_features = n_coord_landmarks, len(information_matrix)
+
+    # Sequential update
+    for _, j in correspondences.items():
+
+        # Obtaining the feature matrix (selecting each feature) - P360
+        feature_matrix = get_feature_matrix(n_rows_features, n_cols_features, j)
+
+        # omega j,j
+        sub_matrix = feature_matrix @ information_matrix @ feature_matrix.T
+        sub_matrix_inv = np.linalg.pinv(sub_matrix)
+        temp_matrix = information_matrix[:j_initial, j: j + 3] @ sub_matrix_inv
+
+        # Storing sub matrix inverse for using in the solver
+        sub_matrices_inv[j] = sub_matrix_inv
+
+        matrix_subtract += temp_matrix @ information_matrix[j: j + 3, :j_initial]
+        vector_subtract += temp_matrix @ information_vector[j: j + 3, :]
+
+    # Final calculations
+    reduced_matrix -= matrix_subtract   # (11.35)
+    reduced_vector -= vector_subtract   # (11.36)
 
     return reduced_matrix, reduced_vector
 
-def graph_slam_solve(reduced_info_matrix, reduced_info_vector, information_matrix, information_vector) -> tuple:
-    pass
+
+def graph_slam_solve(reduced_info_m: np.ndarray, reduced_info_v: np.ndarray, information_m: np.ndarray,
+                     information_v: np.ndarray, correspondences: dict) -> tuple:
+
+    global n_coord_pose
+    global sub_matrices_inv
+
+    # First index of feature in the information arrays
+    j_initial = next(iter(correspondences.items()))[1]
+
+    # Compute covariance posterior paths
+    covariance_path_posterior = np.linalg.pinv(reduced_info_m)
+
+    # Initialization: posterior pose mu
+    pose_posterior = np.zeros((len(information_m), n_coord_pose))
+
+    # Compute path estimates - (11.38)
+    pose_posterior[:j_initial, :] = covariance_path_posterior @ reduced_info_v
+
+    # Computing posterior pose of each landmarks - (11.44)
+    for _, j in correspondences.items():
+
+        covariance_feature = sub_matrices_inv[j]
+        pose_posterior[j: j + 3, :] = covariance_feature \
+                                             @ (information_v[j: j + 3, :] + information_m[j: j + 3, :j_initial]
+                                                @ pose_posterior[:j_initial, :])
+
+    return pose_posterior, covariance_path_posterior
 
 
 def update_matrix(matrix_to_transform: np.ndarray, matrix_to_add: np.ndarray, location_to_update: list) -> np.ndarray:
@@ -225,3 +285,15 @@ def update_matrix(matrix_to_transform: np.ndarray, matrix_to_add: np.ndarray, lo
             matrix_to_transform[j:j + 3, ] += matrix_to_add[k:k+3, ]
 
     return matrix_to_transform
+
+
+def get_feature_matrix(n_rows: int, n_cols: int, j: int) -> np.ndarray:
+
+    feature_matrix = np.zeros((n_rows, n_cols))
+    feature_matrix[:, j:j+3] = np.identity(n_rows)  # (11.34)
+
+    return feature_matrix
+
+
+def pi_to_pi(angle):
+    return (angle + np.pi) % (2 * np.pi) - np.pi
