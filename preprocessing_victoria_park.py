@@ -65,7 +65,7 @@ def gps_measurements():
     return gps, gps_time
 
 
-def common_time_dataset(dimension: int):
+def common_time_dataset(timeframe):
 
     # Retrieving lidar measurements
     lidars, lidar_time = lidar_measurements()
@@ -81,26 +81,26 @@ def common_time_dataset(dimension: int):
     # Creating common vectors for simulating and plotting -> imposed by the smallest time vector
     simulation_time = np.round(gps_time).astype(int)
 
-    # DEBUGGING: STEP
-    n = dimension
-    controls = controls[::n, :]
-    controls_time = controls_time[::n]
-    lidars = [dimension[::n, :] for dimension in lidars]
-    lidar_time = lidar_time[::n]
-    gps = gps[::n, :]
-    simulation_time = simulation_time[::n]
+    # Timeframe studied
+    controls = controls[:timeframe:, :]
+    controls_time = controls_time[:timeframe:]
+    lidars = [dimension[:timeframe:, :] for dimension in lidars]
+    lidar_time = lidar_time[:timeframe:]
+    gps = gps[:timeframe:, :]
+    simulation_time = simulation_time[:timeframe:]
 
     # Simple down sampling of control and lidar -> Can be optimized through interpolation
     step_sim_control = np.floor(len(controls_time) / len(simulation_time)).astype(int)
     step_sim_lidar = np.floor(len(lidar_time) / len(simulation_time)).astype(int)
 
     gps_sim = gps
-    controls_sim = controls[::step_sim_control][:len(simulation_time)]
+    controls_sim = controls[::step_sim_control][:len(simulation_time)].astype('float16')
 
     lidar_sim = []
     for dimension in lidars:
-        lidar_sim.append(dimension[::step_sim_lidar][:len(simulation_time)])
+        lidar_sim.append(dimension[::step_sim_lidar][:len(simulation_time)].astype('float16'))
 
+    # Obtaining unique signatures
     landmarks_signatures = set()
     for signatures in lidar_sim[2]:
         for signature in signatures:
@@ -114,10 +114,10 @@ def common_time_dataset(dimension: int):
     # Building a correspondences dictionary: from a signature to an index
     correspondences = {signature: j + len(simulation_time) for j, signature in enumerate(landmarks_signatures_sorted)}
 
-    print(f"\n Simulation: "
+    print(f"Simulation parameters: \n"
           f"Simulation time: {len(simulation_time)} \n"
           f"Shape of controls: {controls_sim.shape} \n"
           f"Shape of lidar: {[dim.shape for dim in lidar_sim]} \n"
-          f"Shape of GPS: {gps_sim.shape} \n")
+          f"Shape of GPS: {gps_sim.shape}\n")
 
     return controls_sim, lidar_sim, correspondences,  gps_sim, simulation_time
