@@ -15,7 +15,7 @@ def main():
     controls, lidars, correspondences, gps, simulation_time = common_time_dataset(timeframe=1000)
 
     # Animation lidars
-    # animate_lidar(lidars[0], lidars[1], lidars[2])
+    animate_lidar(lidars[0], lidars[1], lidars[2])
 
     # Initialization of the Graph Slam Algorithm
     # Initial pose known
@@ -24,13 +24,10 @@ def main():
 
     # Copying dead reckoning for plotting
     initial_mean_pose = prior_pose[:]
+    posterior_pose = np.zeros(initial_mean_pose.shape)
 
-    """
     # Plotting Parameters
     plot_parameters(prior_pose, gps, simulation_time)
-    """
-
-    # animate_vehicle_pose(gps, initial_mean_pose, simulation_time)
 
     # Linearizing step of the Graph Slam Algorithm
     controls_1_t = controls[1:, ]
@@ -38,6 +35,7 @@ def main():
 
     convergence: bool = False
 
+    cpt = 1
     while not convergence:
 
         information_matrix, information_vector = graph_slam_linearizing(controls_1_t, simulation_time, lidars_1_t,
@@ -53,18 +51,18 @@ def main():
                                                            information_matrix, information_vector, correspondences)
 
         # Does it converge
-        convergence = graph_slam_is_converging(prior_pose, posterior_pose)
+        convergence = graph_slam_is_converging(prior_pose, posterior_pose[:len(simulation_time), :])
 
         # Next iteration is based on the posterior
-        prior_pose = posterior_pose
+        prior_pose = posterior_pose[:len(simulation_time)]
 
-    """
+        cpt += 1
+
     # Animation Vehicle poses and landmarks
     j_initial = next(iter(correspondences.items()))[1]
     posterior_path, landmarks = posterior_pose[:j_initial, :], posterior_pose[j_initial:, :]
 
     animate_vehicle_pose(gps, initial_mean_pose, simulation_time, posterior_path, landmarks)
-    """
 
 
 if __name__ == '__main__':

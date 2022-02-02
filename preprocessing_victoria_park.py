@@ -115,9 +115,9 @@ def common_time_dataset(timeframe):
     correspondences = {signature: j + len(simulation_time) for j, signature in enumerate(landmarks_signatures_sorted)}
 
     print(f"Simulation parameters: \n"
-          f"Simulation time: {len(simulation_time)} \n"
-          f"Shape of controls: {controls_sim.shape} \n"
-          f"Shape of lidar: {[dim.shape for dim in lidar_sim]} \n"
-          f"Shape of GPS: {gps_sim.shape}\n")
+          f"\tSimulation time: {len(simulation_time)} \n"
+          f"\tShape of controls: {controls_sim.shape} \n"
+          f"\tShape of lidar: {[dim.shape for dim in lidar_sim]} \n"
+          f"\tShape of GPS: {gps_sim.shape}\n")
 
     return controls_sim, lidar_sim, correspondences,  gps_sim, simulation_time

@@ -1,6 +1,7 @@
 import os
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+import matplotlib.animation as plt_animation
+from matplotlib.animation import FuncAnimation, PillowWriter
 import datetime
 import numpy as np
 
@@ -10,59 +11,79 @@ if FIGURES_DIRECTORY not in os.listdir():
     os.mkdir(FIGURES_DIRECTORY)
 
 
-def animate_lidar(ranges, bearings, signatures, title="Lidar Measurements of the vehicle"):
+def animate_lidar(ranges, bearings, signatures, title="Victoria Park\nLidar Measurements", plotting=False, saving=False):
 
     fig, axes = plt.subplots(nrows=1, ncols=1)
-    fig.suptitle(title)
-    axes.grid()
-    plt.xlim(-50, 50)
-    plt.ylim(-0.5, 50)
-    t_end = len(ranges)
+    fig.suptitle(title, size=15)
+    axes.set_xlim(-50, 50)
+    axes.set_ylim(-0.5, 50)
+    axes.set_xlabel("Longitude [m]")
+    axes.set_ylabel("Latitude [m]")
 
     # Each time-step plotting the several lasers perceived
     # Maximum landmarks seen at any given time is 18 = ranges.shape[1]
-    landmarks_pool = tuple([axes.plot([], [], marker='o', ls='--', markersize=5)[0] for _ in range(ranges.shape[1])])
-    signatures_pool = tuple([axes.text([], [], '') for _ in range(ranges.shape[1])])
+    landmarks_pool = tuple([axes.plot([], [], 'g^', markersize=10)[0]for _ in range(ranges.shape[1])])
+    lasers_pool = tuple([axes.plot([], [], '--r', )[0] for _ in range(ranges.shape[1])])
+    signatures_pool = tuple([axes.text([], [], '', size=8) for _ in range(ranges.shape[1])])
 
     def init():
+        for landmark in landmarks_pool:
+            landmark.set_data((None, None))
 
-        for laser in landmarks_pool:
+        for laser in lasers_pool:
             laser.set_data([], [])
 
         for signature in signatures_pool:
             signature.set_position((0, 0))
             signature.set_text("")
 
-        return landmarks_pool
+        return landmarks_pool + lasers_pool + signatures_pool
 
     def animate(f, ranges_, bearings_, signatures_):
 
+        # The position of the vehicle is the origin as we work in its referential
+        x_vehicle, y_vehicle = 0, 0
+
+        # Coordinates of landmarks relative to the vehicle
         x_coord_landmarks = ranges_[f, :] * np.cos(bearings_[f, :])
         y_coord_landmarks = ranges_[f, :] * np.sin(bearings_[f, :])
+        signature_plot = sorted([sign for sign in signatures_[f, :]])
 
-        # the position of the vehicle is the origin as we work in its referential
-        x1, y1 = 0, 0
+        for s, laser in enumerate(lasers_pool):
 
-        for s, laser in enumerate(landmarks_pool):
-
-            if signatures_[f, s] != 0:
-                laser.set_data([x1, x_coord_landmarks[s]], [y1, y_coord_landmarks[s]])
+            if not np.isnan(signature_plot[s]):
+                # Laser from vehicle to landmark
+                laser.set_data([x_vehicle, x_coord_landmarks[s]], [y_vehicle, y_coord_landmarks[s]])
+                # Position landmark
+                landmarks_pool[s].set_data(x_coord_landmarks[s], y_coord_landmarks[s])
+                # Position text landmarks
                 signatures_pool[s].set_position((x_coord_landmarks[s] + 0.5, y_coord_landmarks[s] + 0.5))
-                signatures_pool[s].set_text(f"{signatures_[f, s]}")
-
+                signatures_pool[s].set_text(f"{int(signature_plot[s])}")
             else:
                 break
 
-        return landmarks_pool
+        return landmarks_pool + lasers_pool + signatures_pool
 
-    anim = FuncAnimation(fig, animate, frames=t_end, fargs=(ranges, bearings, signatures), init_func=init, interval=200)
+    if plotting or saving:
 
-    plt.draw()
-    plt.show()
+        anim = FuncAnimation(fig, animate, frames=len(ranges), fargs=(ranges, bearings, signatures), init_func=init,
+                             blit=True, interval=200)
+
+        # Plotting animation
+        if plotting:
+            plt.draw()
+            plt.show()
+
+        # Saving the animation as a gif file
+        if saving:
+            filepath_animation = os.path.join(FIGURES_DIRECTORY, "lidar_measurements.gif")
+            anim.save(filepath_animation, writer=PillowWriter(fps=5))
+
+    plt.close()
 
 
 def animate_vehicle_pose(gps: list, initial: list, time: np.ndarray, posterior=np.array([]),
-                         landmarks=np.array([]), title="Position vehicle"):
+                         landmarks=np.array([]), title="Position vehicle", plotting=False, saving=True):
 
     fig, ax = plt.subplots(nrows=1, ncols=1)
     fig.suptitle(title)
@@ -119,7 +140,8 @@ def animate_vehicle_pose(gps: list, initial: list, time: np.ndarray, posterior=n
         if len(posterior) > 0:
             vehicle_posterior.set_data([], [])
             path_post.set_data([], [])
-            return vehicle_gps, path_gps, vehicle_initial, path_init, vehicle_posterior, path_post, pose_gps_text, time_viz
+            return vehicle_gps, path_gps, vehicle_initial, path_init, vehicle_posterior, path_post, pose_gps_text, \
+                   time_viz
 
         return vehicle_gps, path_gps, vehicle_initial, path_init, pose_gps_text, time_viz
 
@@ -148,21 +170,36 @@ def animate_vehicle_pose(gps: list, initial: list, time: np.ndarray, posterior=n
             path_post_y.append(posterior_[f][1])
             path_post.set_data(path_post_x, path_post_y)
 
-            return vehicle_gps, path_gps, vehicle_initial, path_init, vehicle_posterior, path_post, pose_gps_text, time_viz
+            return vehicle_gps, path_gps, vehicle_initial, path_init, vehicle_posterior, path_post, pose_gps_text, \
+                   time_viz
 
         return vehicle_gps, path_gps, vehicle_initial, path_init, pose_gps_text, time_viz
 
-    anim_gps = FuncAnimation(fig, animate, frames=len(time), fargs=(gps, initial, posterior, time),
+    if plotting or saving:
+        anim = FuncAnimation(fig, animate, frames=len(time), fargs=(gps, initial, posterior, time),
                              init_func=init,  blit=True,
                              repeat=False)
+        plt.legend(["GPS Pose", "Initial mean pose", "Posterior pose"], loc='lower right')
 
-    plt.legend(["GPS Pose", "Initial mean pose", "Posterior pose"], loc='lower right')
+        # Plotting animation
+        if plotting:
+            plt.draw()
+            plt.show()
+
+        # Saving the animation as a gif file
+        if saving:
+            filepath_animation = os.path.join(FIGURES_DIRECTORY, "slam.gif")
+            anim.save(filepath_animation, writer=PillowWriter(fps=5))
+
 
     plt.draw()
-    plt.show()
+    plt.show(block=BLOCK)
 
 
-def plot_parameters(initial_pose, gps, simulation_time, title="Parameters"):
+def plot_parameters(initial_pose, gps, simulation_time, title="Parameters", plotting=False, saving=True):
+
+    if not plotting and not saving:
+        return
 
     fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 6))
     fig.suptitle(title)
@@ -179,4 +216,10 @@ def plot_parameters(initial_pose, gps, simulation_time, title="Parameters"):
     axes[1].legend(["y initial estimate", "y gps"])
     axes[1].grid()
 
-    plt.show()
+    if plotting:
+        plt.show(block=BLOCK)
+
+    filepath_figure = os.path.join(FIGURES_DIRECTORY, title)
+    if saving:
+        plt.savefig(filepath_figure)
+        plt.close()

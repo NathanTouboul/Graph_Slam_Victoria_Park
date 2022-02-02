@@ -1,4 +1,3 @@
-import time
 import numpy as np
 
 # Disturbance noise covariance matrix (Rt)
@@ -23,7 +22,6 @@ L = 2.83   # meters - span between wheels
 A = 0.95   # meters - distance from center of mass to laser - x
 B = 0.5    # meters - distance from center of mass to laser - y
 H = 0.76   # meters - distance from center of mass to encoder - y
-
 
 
 def graph_slam_initialize(controls: np.ndarray, time: np.ndarray, origin_pose=np.zeros((3, 1))):
@@ -77,7 +75,6 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
     """
 
     # mean pose argument from 0 to t_end - other arguments from 1 to t_end
-
     nb_landmarks = len(correspondences)
 
     # composed of 4466 (len(time)) pose * 3 coord + total number of landmarks detected
@@ -165,10 +162,10 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
             delta_y = pose[j, 1] - pose[t, 1]
             delta = np.array([[delta_x], [delta_y]])
 
-            # q
+            #
             q = delta.T @ delta
 
-            # Measurement and revised measurements
+            # Raw and revised measurements
             sqrt_q = np.sqrt(q)
             z, z_hat = np.zeros((3, 1)), np.zeros((3, 1))
             z[0], z[1], z[2] = ranges[s], bearings[s], signatures[s]
@@ -214,6 +211,9 @@ def graph_slam_reduce(information_matrix: np.ndarray, information_vector: np.nda
     global n_coord_landmarks
     global sub_matrices_inv
 
+    # Initializing
+    sub_matrices_inv = dict()
+
     # The last time t (t + 1 actually) is given by the first index of feature: j
     # Obtaining the first value of index (the dictionary was constructed sorted)
     j_initial = next(iter(correspondences.items()))[1]
@@ -229,9 +229,6 @@ def graph_slam_reduce(information_matrix: np.ndarray, information_vector: np.nda
     matrix_subtract = np.zeros_like(reduced_matrix, )
     vector_subtract = np.zeros_like(reduced_vector, )
 
-    n_rows_features, n_cols_features = n_coord_landmarks, len(information_matrix)
-
-    start_time, end_time = list(), list()
     # Sequential update
     for _, j in correspondences.items():
 
@@ -292,8 +289,22 @@ def graph_slam_solve(reduced_info_m: np.ndarray, reduced_info_v: np.ndarray, inf
 
 
 def graph_slam_is_converging(prior_pose: np.ndarray, posterior_pose: np.ndarray) -> bool:
+    """
+    fig, axes = plt.subplots(nrows=1, ncols=1)
+    axes.plot(prior_pose[:, 0])
+    axes.plot(prior_pose[:, 1])
+    axes.plot(posterior_pose[:, 0])
+    axes.plot(posterior_pose[:, 1])
+    plt.legend(["Prior x", "Prior y", "Posterior x", "Posterior y"])
+    plt.show()
+    """
+    root_sum_square = np.sqrt(np.square(prior_pose[:, 0] - posterior_pose[:, 0]) + np.square(prior_pose[:, 1]
+                                                                                             - posterior_pose[:, 1]))
+    print(f"{np.mean(root_sum_square) = }")
+    if np.all(root_sum_square) < 0.001:
+        return True
 
-    return True
+    return False
 
 
 def update_matrix(matrix_to_transform: np.ndarray, matrix_to_add: np.ndarray, location_to_update: list) -> np.ndarray:
