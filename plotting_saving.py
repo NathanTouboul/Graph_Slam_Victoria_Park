@@ -1,9 +1,9 @@
 import os
 import matplotlib.pyplot as plt
-import matplotlib.animation as plt_animation
 from matplotlib.animation import FuncAnimation, PillowWriter
 import datetime
 import numpy as np
+from preprocessing_victoria_park import down_sampling
 
 BLOCK = False
 FIGURES_DIRECTORY = f"figures"
@@ -82,15 +82,19 @@ def animate_lidar(ranges, bearings, signatures, title="Victoria Park\nLidar Meas
     plt.close()
 
 
-def animate_vehicle_pose(gps: list, initial: list, time: np.ndarray, posterior=np.array([]),
-                         landmarks=np.array([]), title="Position vehicle", plotting=False, saving=True):
+def animate_vehicle_pose(gps: np.ndarray, initial: np.ndarray, time: np.ndarray, posterior=np.array([]),
+                         landmarks=np.array([]), title="Position vehicle", plotting=False, saving=False):
+
+    if not plotting and not saving:
+        return
+
+    # Down sampling pose to match gps frequency
+    if len(initial) > len(gps):
+        initial = down_sampling(initial, gps)
 
     fig, ax = plt.subplots(nrows=1, ncols=1)
     fig.suptitle(title)
     ax.grid()
-    #plt.xlim(np.min(initial[:, 0]) - 1, np.max(initial[:, 0]) + 1)
-    #plt.ylim(np.min(initial[:, 1]) - 1, np.max(initial[:, 1]) + 1)
-
     plt.xlim(np.min(initial[:, 0]) - 1, np.max(initial[:, 0]) + 1)
     plt.ylim(np.min(initial[:, 1]) - 1, np.max(initial[:, 1]) + 1)
 
@@ -111,11 +115,12 @@ def animate_vehicle_pose(gps: list, initial: list, time: np.ndarray, posterior=n
         path_post_x, path_post_y = [], []
 
     # Landmarks
-    if len(landmarks) > 0:
-        ax.scatter(landmarks[:, 0], landmarks[:, 1])
-        signatures_pool = tuple([ax.text([], [], '') for _ in range(len(landmarks))])
-        for s, _ in enumerate(signatures_pool):
-            signatures_pool[s].set_position((landmarks[s, 0] + 0.5, landmarks[s, 1] + 0.5))
+    #if len(landmarks) > 0:
+        #ax.scatter(landmarks[:, 0], landmarks[:, 1])
+        #signatures_pool = tuple([ax.text([], [], '') for _ in range(len(landmarks))])
+
+        #for s, _ in enumerate(signatures_pool):
+            #signatures_pool[s].set_position((landmarks[s, 0] + 0.5, landmarks[s, 1] + 0.5))
             #signatures_pool[s].set_text(f"{int(landmarks[s, 2])}")
 
     # Information to display
@@ -188,9 +193,8 @@ def animate_vehicle_pose(gps: list, initial: list, time: np.ndarray, posterior=n
 
         # Saving the animation as a gif file
         if saving:
-            filepath_animation = os.path.join(FIGURES_DIRECTORY, "slam.gif")
-            anim.save(filepath_animation, writer=PillowWriter(fps=5))
-
+            filepath_animation = os.path.join(FIGURES_DIRECTORY, title + ".gif")
+            anim.save(filepath_animation, writer=PillowWriter(fps=2))
 
     plt.draw()
     plt.show(block=BLOCK)
@@ -201,25 +205,46 @@ def plot_parameters(initial_pose, gps, simulation_time, title="Parameters", plot
     if not plotting and not saving:
         return
 
+    simulation_time_gps = simulation_time
+    # Down sampling pose to match gps frequency
+    if len(initial_pose) > len(gps):
+        simulation_time_gps = down_sampling(simulation_time, gps)
+
     fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 6))
     fig.suptitle(title)
 
     axes[0].set_title(f"Initial pose estimate: x and y")
     axes[0].plot(simulation_time, initial_pose[:, 0])
 
-    axes[0].plot(simulation_time, gps[:, 0])
+    axes[0].plot(simulation_time_gps, gps[:, 0])
     axes[0].legend(["x initial estimate", "x gps"])
     axes[0].grid()
 
     axes[1].plot(simulation_time, initial_pose[:, 1])
-    axes[1].plot(simulation_time, gps[:, 1])
+    axes[1].plot(simulation_time_gps, gps[:, 1])
     axes[1].legend(["y initial estimate", "y gps"])
     axes[1].grid()
 
     if plotting:
         plt.show(block=BLOCK)
 
-    filepath_figure = os.path.join(FIGURES_DIRECTORY, title)
     if saving:
+        filepath_figure = os.path.join(FIGURES_DIRECTORY, title)
         plt.savefig(filepath_figure)
         plt.close()
+
+
+def plot_paths(initial_path, posterior_path, title="Paths", plotting=True, saving=False):
+
+    if not plotting and not saving:
+        return
+
+    fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(10, 6))
+    fig.suptitle(title)
+
+    axes.set_title(f"Initial pose estimate: x and y")
+    axes.plot(initial_path[:, 0], initial_path[:, 1])
+    axes.plot(posterior_path[:, 0], posterior_path[:, 1])
+
+    if plotting:
+        plt.show()

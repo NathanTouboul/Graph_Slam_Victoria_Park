@@ -73,6 +73,7 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
     :param initial_mean_pose:
     :return:
     """
+    print(f"Linearizing step")
 
     # mean pose argument from 0 to t_end - other arguments from 1 to t_end
     nb_landmarks = len(correspondences)
@@ -83,8 +84,8 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
     # 3 coordinates for vehicle: x, y and theta and tree coordinates for landmarks: x, y and signature
     dim_info = n_pose * n_coord + nb_landmarks * n_coord_landmarks
 
-    information_matrix = np.zeros((dim_info, dim_info), )
-    information_vector = np.zeros((dim_info, n_coord_pose), )
+    information_matrix = np.zeros((dim_info, dim_info))
+    information_vector = np.zeros((n_pose + nb_landmarks, n_coord))
 
     # Adding infinite information to fixe the first pose at the origin (otherwise matrix might become singular)
     information_matrix[0:3, 0:3] = np.diag([INF] * 3)
@@ -105,11 +106,11 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
         heading = initial_mean_pose[t - 1][2]
 
         # Linear approximation of the non-linear control function g
-        x_hat = np.zeros(np.shape(initial_mean_pose[t - 1]))
+        x_hat = np.zeros((np.shape(initial_mean_pose[t - 1])[0], 1))
         x_hat[0] = initial_mean_pose[t - 1][0] + delta_t * (speed * np.cos(heading) - (speed / L) * np.tan(steering)
-                                                 * (A * np.sin(heading) + B * np.cos(heading)))
+                                                            * (A * np.sin(heading) + B * np.cos(heading)))
         x_hat[1] = initial_mean_pose[t - 1][1] + delta_t * (speed * np.sin(heading) + (speed / L) * np.tan(steering)
-                                                 * (A * np.cos(heading) - B * np.sin(heading)))
+                                                            * (A * np.cos(heading) - B * np.sin(heading)))
         x_hat[2] = pi_to_pi(heading + (delta_t * speed / L) * np.tan(steering))
 
         g_matrix = np.identity(3)
@@ -122,11 +123,11 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
         location_to_update = [t - 1, t]
         constraint_0 = np.vstack([-g_matrix.T, np.identity(3)]) @ DISTURBANCE_COV_INV
         constraint_1 = constraint_0 @ np.hstack([-g_matrix, np.identity(3)])
-        constraint_2 = constraint_0 @ (x_hat - g_matrix @ initial_mean_pose[t - 1])
+        constraint_2 = constraint_0 @ (x_hat - g_matrix @ np.expand_dims(initial_mean_pose[t - 1, :], 1))
 
         information_matrix = update_matrix(information_matrix, constraint_1, location_to_update)
-        information_vector = update_matrix(information_vector, np.expand_dims(constraint_2, axis=1),
-                                           location_to_update)
+        information_vector = update_matrix(information_vector, constraint_2.T, location_to_update)
+
         # Updating time
         t += 1
 
@@ -194,7 +195,7 @@ def graph_slam_linearizing(controls, time, lidars, correspondences,  initial_mea
             ht_q_inv_z_plus_h_mu = ht_q_inv @ (measurement_error + h @ mu)
 
             information_matrix = update_matrix(information_matrix, ht_q_inv_h, location_to_update)
-            information_vector = update_matrix(information_vector, ht_q_inv_z_plus_h_mu, location_to_update)
+            information_vector = update_matrix(information_vector, ht_q_inv_z_plus_h_mu.T, location_to_update)
 
     return information_matrix, information_vector
 
@@ -210,6 +211,8 @@ def graph_slam_reduce(information_matrix: np.ndarray, information_vector: np.nda
 
     global n_coord_landmarks
     global sub_matrices_inv
+
+    print(f"Reducing step")
 
     # Initializing
     sub_matrices_inv = dict()
@@ -241,7 +244,7 @@ def graph_slam_reduce(information_matrix: np.ndarray, information_vector: np.nda
         sub_matrices_inv[j] = sub_matrix_inv
 
         matrix_subtract += temp_matrix @ information_matrix[j: j + 3, :j_initial]
-        vector_subtract += temp_matrix @ information_vector[j: j + 3, :]
+        vector_subtract += temp_matrix @ np.expand_dims(information_vector[j, :], 1)
 
     # Final calculations
     reduced_matrix -= matrix_subtract   # (11.35)
@@ -262,6 +265,7 @@ def graph_slam_solve(reduced_info_m: np.ndarray, reduced_info_v: np.ndarray, inf
     :return:
     """
 
+    print(f"Solving step")
     global n_coord_pose
     global sub_matrices_inv
 
@@ -269,7 +273,7 @@ def graph_slam_solve(reduced_info_m: np.ndarray, reduced_info_v: np.ndarray, inf
     j_initial = next(iter(correspondences.items()))[1]
 
     # Compute covariance posterior paths
-    covariance_path_posterior = np.linalg.pinv(reduced_info_m)
+    covariance_path_posterior = np.linalg.inv(reduced_info_m)
 
     # Initialization: posterior pose mu
     pose_posterior = np.zeros((len(information_m), n_coord_pose), )
@@ -277,18 +281,23 @@ def graph_slam_solve(reduced_info_m: np.ndarray, reduced_info_v: np.ndarray, inf
     # Compute path estimates - (11.38)
     pose_posterior[:j_initial, :] = covariance_path_posterior @ reduced_info_v
 
+    """
     # Computing posterior pose of each landmarks - (11.44)
     for _, j in correspondences.items():
 
         covariance_feature = sub_matrices_inv[j]
-        pose_posterior[j: j + 3, :] = covariance_feature \
-                                             @ (information_v[j: j + 3, :] + information_m[j: j + 3, :j_initial]
-                                                @ pose_posterior[:j_initial, :])
+        information_vector_feature = np.expand_dims(information_v[j, :], 1)
+        pose_posterior_j = covariance_feature \
+            @ (information_vector_feature + information_m[j: j + 3, :j_initial] @ pose_posterior[:j_initial, :])
+
+        pose_posterior[j, :] = pose_posterior_j.T
+    
+    """
 
     return pose_posterior, covariance_path_posterior
 
 
-def graph_slam_is_converging(prior_pose: np.ndarray, posterior_pose: np.ndarray) -> bool:
+def graph_slam_is_converging(prior_pose: np.ndarray, posterior_pose: np.ndarray, truth) -> bool:
     """
     fig, axes = plt.subplots(nrows=1, ncols=1)
     axes.plot(prior_pose[:, 0])
@@ -298,10 +307,13 @@ def graph_slam_is_converging(prior_pose: np.ndarray, posterior_pose: np.ndarray)
     plt.legend(["Prior x", "Prior y", "Posterior x", "Posterior y"])
     plt.show()
     """
-    root_sum_square = np.sqrt(np.square(prior_pose[:, 0] - posterior_pose[:, 0]) + np.square(prior_pose[:, 1]
-                                                                                             - posterior_pose[:, 1]))
-    print(f"{np.mean(root_sum_square) = }")
-    if np.all(root_sum_square) < 0.001:
+    root_sum_square_pp = np.sqrt(np.square(prior_pose[:, 0] - posterior_pose[:, 0]) + np.square(prior_pose[:, 1]
+                                                                                                - posterior_pose[:, 1]))
+
+    root_sum_square_truth = np.sqrt(np.square(truth[:, 0] - posterior_pose[:, 0]) + np.square(truth[:, 1]
+                                                                                            - posterior_pose[:, 1]))
+    print(f"{np.mean(root_sum_square_truth) = }")
+    if np.all(root_sum_square_pp) < 0.001:
         return True
 
     return False
@@ -309,19 +321,19 @@ def graph_slam_is_converging(prior_pose: np.ndarray, posterior_pose: np.ndarray)
 
 def update_matrix(matrix_to_transform: np.ndarray, matrix_to_add: np.ndarray, location_to_update: list) -> np.ndarray:
 
-    for cpt, loc in enumerate(location_to_update):
+    # Update matrix
+    if matrix_to_add.shape[0] > 1:
+        loc1, loc2 = 3 * location_to_update[0], 3 * location_to_update[1]
+        matrix_to_transform[loc1:loc1+3, loc1:loc1+3] += matrix_to_add[0:3, 0:3]
+        matrix_to_transform[loc1:loc1+3, loc2:loc2+3] += matrix_to_add[0:3, 3:6]
+        matrix_to_transform[loc2:loc2+3, loc1:loc1+3] += matrix_to_add[3:6, 0:3]
+        matrix_to_transform[loc2:loc2+3, loc2:loc2+3] += matrix_to_add[3:6, 3:6]
 
-        j = 3 * loc
-        k = 3 * cpt
-
-        if matrix_to_add.shape[1] > 1:
-
-            # Update matrix
-            matrix_to_transform[j:j+3, j:j+3] += matrix_to_add[k:k+3, k:k+3]
-
-        elif matrix_to_add.shape[1] == 1:
-            # Update vector
-            matrix_to_transform[j:j + 3, ] += matrix_to_add[k:k+3, ]
+    # Update vector
+    else:
+        loc1, loc2 = location_to_update[0], location_to_update[1]
+        matrix_to_transform[loc1, :] += matrix_to_add[0, 0:3]
+        matrix_to_transform[loc2, :] += matrix_to_add[0, 3:6]
 
     return matrix_to_transform
 

@@ -65,7 +65,7 @@ def gps_measurements():
     return gps, gps_time
 
 
-def common_time_dataset(timeframe):
+def common_time_dataset(timeframe=-1):
 
     # Retrieving lidar measurements
     lidars, lidar_time = lidar_measurements()
@@ -78,27 +78,22 @@ def common_time_dataset(timeframe):
     # Retrieving GPS dataset (truth localisation)
     gps, gps_time = gps_measurements()
 
-    # Creating common vectors for simulating and plotting -> imposed by the smallest time vector
-    simulation_time = np.round(gps_time).astype(int)
+    # Simulating time -> imposed by the smallest frequency between controls and measurements (lidar)
+    simulation_time = np.round(lidar_time)
 
     # Timeframe studied
     controls = controls[:timeframe:, :]
     controls_time = controls_time[:timeframe:]
     lidars = [dimension[:timeframe:, :] for dimension in lidars]
-    lidar_time = lidar_time[:timeframe:]
     gps = gps[:timeframe:, :]
     simulation_time = simulation_time[:timeframe:]
 
-    # Simple down sampling of control and lidar -> Can be optimized through interpolation
-    step_sim_control = np.floor(len(controls_time) / len(simulation_time)).astype(int)
-    step_sim_lidar = np.floor(len(lidar_time) / len(simulation_time)).astype(int)
-
-    gps_sim = gps
-    controls_sim = controls[::step_sim_control][:len(simulation_time)].astype('float16')
+    # Simple down sampling of control -> Can be optimized through interpolation
+    controls_sim = down_sampling(controls, lidars[0])
 
     lidar_sim = []
     for dimension in lidars:
-        lidar_sim.append(dimension[::step_sim_lidar][:len(simulation_time)].astype('float16'))
+        lidar_sim.append(dimension[::][:len(simulation_time)])
 
     # Obtaining unique signatures
     landmarks_signatures = set()
@@ -118,6 +113,12 @@ def common_time_dataset(timeframe):
           f"\tSimulation time: {len(simulation_time)} \n"
           f"\tShape of controls: {controls_sim.shape} \n"
           f"\tShape of lidar: {[dim.shape for dim in lidar_sim]} \n"
-          f"\tShape of GPS: {gps_sim.shape}\n")
+          f"\tShape of GPS: {gps.shape}\n")
 
-    return controls_sim, lidar_sim, correspondences,  gps_sim, simulation_time
+    return controls_sim, lidar_sim, correspondences,  gps, simulation_time
+
+
+def down_sampling(high_frequency_signal1, low_frequency_signal2):
+
+    step = np.floor(len(high_frequency_signal1) / len(low_frequency_signal2)).astype(int)
+    return high_frequency_signal1[::step][:len(low_frequency_signal2)]
